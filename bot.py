@@ -15,10 +15,30 @@ if not BOT_TOKEN:
 
 CACHE_TTL = 300
 DB_FILE = "users.json"
+HEROES_FILE = "heroes.json"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 _cache = {}
+
+# === ЗАГРУЗКА ГЕРОЕВ ===
+def load_heroes():
+    try:
+        if Path(HEROES_FILE).exists():
+            with open(HEROES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Ошибка загрузки heroes.json: {e}")
+    return {}
+
+heroes_db = load_heroes()
+logger.info(f"✅ Загружено {len(heroes_db)} героев из {HEROES_FILE}")
+
+def get_hero_info(hero_id):
+    hero_id_str = str(hero_id)
+    if hero_id_str in heroes_db:
+        return heroes_db[hero_id_str]
+    return {"name_ru": "Неизвестный герой", "emoji": "⚔️"}
 
 # === БАЗА ДАННЫХ ПОЛЬЗОВАТЕЛЕЙ ===
 def load_users():
@@ -70,9 +90,7 @@ def format_profile(data):
     s = data["profile"]
     name = p.get("personaname", "Unknown")
     
-    # Получаем только ранг (медаль)
     rank_tier = s.get("rank_tier")
-    
     if rank_tier:
         tier = rank_tier // 10
         stars = rank_tier % 10
@@ -94,11 +112,15 @@ def format_profile(data):
     ]
     
     for m in data["matches"]:
-        hero = m.get("hero_name", "?")
+        hero_id = m.get("hero_id", 0)
+        hero_info = get_hero_info(hero_id)
+        
         kda = f"{m['kills']}/{m['deaths']}/{m['assists']}"
         dur = m["duration"] // 60
         win = "✅" if m.get("win") else "❌"
-        text.append(f"{win} {hero} | {kda} | {dur}м")
+        
+        # Формат: ✅ 🪝 Пудж | 12/5/15 | 45м
+        text.append(f"{win} {hero_info['emoji']} {hero_info['name_ru']} | {kda} | {dur}м")
         
     if not data["matches"]:
         text.append("Нет недавних матчей")
@@ -136,7 +158,6 @@ async def cmd_link(message: types.Message):
         )
     
     account_id = args[1]
-    # Проверяем, существует ли аккаунт
     data = await get_player_data(account_id)
     if not data:
         return await message.answer("❌ Аккаунт не найден или приватен. Проверь ID.")
@@ -164,7 +185,6 @@ async def cmd_profile(message: types.Message):
     args = message.text.split()
     user_id = str(message.from_user.id)
     
-    # Определяем какой ID использовать
     if len(args) >= 2 and args[1].isdigit():
         account_id = args[1]
     elif user_id in users_db:
@@ -194,7 +214,7 @@ async def main():
     dp.message.register(cmd_unlink, Command("unlink"))
     dp.message.register(cmd_profile, Command("profile"))
     
-    logger.info("✅ Бот запущен с системой регистрации!")
+    logger.info("✅ Бот запущен с отдельной базой героев!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
