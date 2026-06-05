@@ -117,10 +117,25 @@ def format_profile(data):
         
         kda = f"{m['kills']}/{m['deaths']}/{m['assists']}"
         dur = m["duration"] // 60
-        win = "✅" if m.get("win") else "❌"
+        match_id = m.get("match_id", "???")
         
-        # Формат: ✅ 🪝 Пудж | 12/5/15 | 45м
-        text.append(f"{win} {hero_info['emoji']} {hero_info['name_ru']} | {kda} | {dur}м")
+        # === НАДЕЖНАЯ ПРОВЕРКА ПОБЕДЫ ===
+        radiant_win = m.get("radiant_win")
+        player_slot = m.get("player_slot", 0)
+        is_radiant = player_slot < 128
+        
+        # Берем значение win из API, но если его нет или оно странное, считаем сами
+        api_win = m.get("win")
+        if api_win is None:
+            actual_win = (radiant_win == is_radiant)
+            logger.info(f"Матч {match_id}: поле win отсутствовало, рассчитано как {actual_win}")
+        else:
+            actual_win = bool(api_win)
+            
+        win_emoji = "✅" if actual_win else "❌"
+        # ==================================
+        
+        text.append(f"{win_emoji} {hero_info['emoji']} {hero_info['name_ru']} | {kda} | {dur}м")
         
     if not data["matches"]:
         text.append("Нет недавних матчей")
