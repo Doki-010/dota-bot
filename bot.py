@@ -69,7 +69,19 @@ def format_profile(data):
     p = data["profile"]["profile"]
     s = data["profile"]
     name = p.get("personaname", "Unknown")
-    mmr = s.get("mmr_estimate", {}).get("estimate", "Скрыт")
+    
+    # Получаем только ранг (медаль)
+    rank_tier = s.get("rank_tier")
+    
+    if rank_tier:
+        tier = rank_tier // 10
+        stars = rank_tier % 10
+        medals = ["Herald", "Guardian", "Crusader", "Archon", "Legend", "Ancient", "Divine", "Immortal"]
+        medal_name = medals[tier - 1] if 1 <= tier <= 8 else "Unknown"
+        rank_text = f"Ранг: {medal_name} {stars}★"
+    else:
+        rank_text = "Ранг: Нет данных (не играл рейтинг недавно или профиль скрыт)"
+    
     wins = s.get("wins", 0)
     losses = s.get("losses", 0)
     total = wins + losses
@@ -77,17 +89,20 @@ def format_profile(data):
 
     text = [
         f"🎮 <b>{name}</b>",
-        f"🏆 MMR: <b>{mmr}</b> | WR: {wr} ({total} игр)",
+        f"🏆 <b>{rank_text}</b> | WR: {wr} ({total} игр)",
         "", "<b>📜 Последние 5 матчей:</b>"
     ]
+    
     for m in data["matches"]:
         hero = m.get("hero_name", "?")
         kda = f"{m['kills']}/{m['deaths']}/{m['assists']}"
         dur = m["duration"] // 60
         win = "✅" if m.get("win") else "❌"
         text.append(f"{win} {hero} | {kda} | {dur}м")
+        
     if not data["matches"]:
         text.append("Нет недавних матчей")
+        
     return "\n".join(text)
 
 # === КОМАНДЫ ===
