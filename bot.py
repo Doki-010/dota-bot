@@ -4,8 +4,10 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import ClientSession
 
 # === НАСТРОЙКИ ===
@@ -20,6 +22,12 @@ HEROES_FILE = "heroes.json"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 _cache = {}
+
+# === КЛАВИАТУРА ===
+def get_profile_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Моя статистика", callback_data="show_my_profile")
+    return builder.as_markup()
 
 # === ЗАГРУЗКА ГЕРОЕВ ===
 def load_heroes():
@@ -119,21 +127,17 @@ def format_profile(data):
         dur = m["duration"] // 60
         match_id = m.get("match_id", "???")
         
-        # === НАДЕЖНАЯ ПРОВЕРКА ПОБЕДЫ ===
         radiant_win = m.get("radiant_win")
         player_slot = m.get("player_slot", 0)
         is_radiant = player_slot < 128
         
-        # Берем значение win из API, но если его нет или оно странное, считаем сами
         api_win = m.get("win")
         if api_win is None:
             actual_win = (radiant_win == is_radiant)
-            logger.info(f"Матч {match_id}: поле win отсутствовало, рассчитано как {actual_win}")
         else:
             actual_win = bool(api_win)
             
         win_emoji = "✅" if actual_win else "❌"
-        # ==================================
         
         text.append(f"{win_emoji} {hero_info['emoji']} {hero_info['name_ru']} | {kda} | {dur}м")
         
@@ -152,14 +156,13 @@ async def cmd_start(message: types.Message):
         "Я показываю статистику игроков и последние матчи.\n\n"
         "<b>Команды:</b>\n"
         "/link &lt;ID&gt; — привязать свой аккаунт\n"
-        "/profile [ID] — посмотреть статистику\n"
         "/unlink — отвязать аккаунт\n\n"
         "<i>Найти свой ID можно на opendota.com</i>"
     )
     if linked:
         text += f"\n\n✅ Твой привязанный ID: <code>{linked}</code>"
     
-    await message.answer(text, parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=get_profile_keyboard())
 
 async def cmd_link(message: types.Message):
     args = message.text.split()
@@ -183,8 +186,9 @@ async def cmd_link(message: types.Message):
     name = data["profile"]["profile"].get("personaname", "Unknown")
     await message.answer(
         f"✅ Аккаунт <b>{name}</b> (<code>{account_id}</code>) успешно привязан!\n"
-        "Теперь используй просто /profile",
-        parse_mode="HTML"
+        "Теперь нажми кнопку ниже, чтобы увидеть статистику 👇",
+        parse_mode="HTML",
+        reply_markup=get_profile_keyboard()
     )
 
 async def cmd_unlink(message: types.Message):
@@ -196,28 +200,31 @@ async def cmd_unlink(message: types.Message):
     else:
         await message.answer("У тебя нет привязанного аккаунта.")
 
-async def cmd_profile(message: types.Message):
-    args = message.text.split()
-    user_id = str(message.from_user.id)
-    
-    if len(args) >= 2 and args[1].isdigit():
-        account_id = args[1]
-    elif user_id in users_db:
-        account_id = users_db[user_id]
-    else:
-        return await message.answer(
-            "❗ Укажи ID: <code>/profile 87276347</code>\n"
-            "Или привяжи аккаунт через /link",
-            parse_mode="HTML"
-        )
-    
-    wait_msg = await message.answer("⏳ Ищу игрока...")
+# === ОБРАБОТЧИК НАЖАТИЯ НА КНОПКУ ===
+async def callback_show_profile(callback: CallbackQuery):
+    user_id = str(callback.from_user.id)
+    account_id = users_db.get(user_id)
+
+    if not account_id:
+        await callback.answer("❗ Сначала привяжи аккаунт через команду /link", show_alert=True)
+        return
+
+    # Отправляем сообщение о загрузке
+    wait_msg = await callback.message.answer("⏳ Ищу игрока...")
     data = await get_player_data(account_id)
     
     if not data:
-        return await wait_msg.edit_text("❌ Игрок не найден или профиль приватен")
+        await wait_msg.edit_text("❌ Игрок не найден или профиль приватен")
+        return
     
-    await wait_msg.edit_text(format_profile(data), parse_mode="HTML")
+    # Показываем статистику и возвращаем кнопку, чтобы можно было нажать снова
+    await wait_msg.edit_text(
+        format_profile(data), 
+        parse_mode="HTML", 
+        reply_markup=get_profile_keyboard()
+    )
+    # Убираем кружок загрузки с самой кнопки
+    await callback.answer()
 
 # === ЗАПУСК ===
 async def main():
@@ -227,9 +234,11 @@ async def main():
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(cmd_link, Command("link"))
     dp.message.register(cmd_unlink, Command("unlink"))
-    dp.message.register(cmd_profile, Command("profile"))
     
-    logger.info("✅ Бот запущен с отдельной базой героев!")
+    # Регистрируем обработчик нажатия на кнопку
+    dp.callback_query.register(callback_show_profile, F.data == "show_my_profile")
+    
+    logger.info("✅ Бот запущен с inline-кнопками!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
